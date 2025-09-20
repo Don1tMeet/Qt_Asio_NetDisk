@@ -6,9 +6,29 @@
 #include <QString>
 #include <mutex>
 #include <condition_variable>
-#include "SR_Tool.h"
+// include "SR_Tool.h"
 #include "protocol.h"
 
+class SR_Tool;
+
+struct UpContext {
+    TranPdu tran_pdu{ {0} };            // 上传下载通信结构体
+    QString file_name;                  // 文件名（带路径）
+    QFile file;                         // 上传下载文件对象
+
+    uint64_t total_bytes{ 0 };          // 需要发送的总字节数
+    uint64_t sended_bytes{ 0 };         // 已发送字节数
+
+    uint32_t total_chunks{ 0 };         // 总chunk数
+    const uint32_t chunk_size{ 2048 };  // 每次发送块的大小
+    uint32_t last_chunk_size{ 0 };      // 最后一个chunk的大小
+    std::set<uint32_t> unacked_id;      // 未确认的chunk id
+
+    // 工作控制，0为继续，1为暂停，2为结束
+    std::shared_ptr<std::atomic<std::uint32_t>> ctrl{ nullptr };
+    std::shared_ptr<std::condition_variable> cv{ nullptr };
+    std::shared_ptr<std::mutex> mtx{ nullptr };
+};
 
 // 处理上传下载（长任务）的类
 class UdTool : public QObject {
@@ -54,20 +74,10 @@ private:
 
 private:
     std::shared_ptr<SR_Tool> sr_tool_;  // 发送接收工具
-    TranPdu tran_pdu_{ {0} };           // 上传下载通信结构体
-    QString file_name_;                 // 文件名（带路径）
-    QFile file_;                        // 上传下载文件对象
-    std::set<uint32_t> unacked_id_;     // 未确认的chunk id
-    uint32_t total_chunks_{ 0 };        // !!!!!!!!!!!!!!! 后续创建UploadContext后，删除 !!!!!!!!!!!!!!!!!!!!!
+    UpContext file_ctx_;
 
-    uint32_t update_progress_need_chunks_{ 1 }; // 每次更新进度条需要的chunks
-
-    boost::system::error_code ec_;      // 错误码
-
-    // 工作控制，0为继续，1为暂停，2为结束
-    std::shared_ptr<std::atomic<std::uint32_t>> control_{ nullptr };
-    std::shared_ptr<std::condition_variable> cv_{ nullptr };
-    std::shared_ptr<std::mutex> mutex_{ nullptr };
+    double last_progress_{ 0 };  // 最后一次进度
+    const double progress_step_{ 0.003 };   // 更新进度条的最小进度
 };
 
 #endif // UDTOOL_H

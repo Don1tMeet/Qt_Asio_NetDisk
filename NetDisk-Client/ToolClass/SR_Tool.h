@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <atomic>
+#include "UdTool.h"
 #include "Serializer.h"
 #include "protocol.h"
 
@@ -37,28 +38,36 @@ public:
 
 public:
     // 异步操作，异步事件完成会触发相关信号。连接信号，接收异步结果。也可以传递回调函数，在异步事件就绪时候，调用回调函数。调用异步任务后，需要SR_run()启动异步循环
-    void asyncConnect();                            // 异步连接服务器
-    void asyncConnect(std::function<void()> fun);   // 传递函数对象，异步连接
+    // void asyncConnect();                            // 异步连接服务器
+    // void asyncConnect(std::function<void()> fun);   // 传递函数对象，异步连接
 
-    void asyncSend(buffer_shared_ptr buf, size_t len);          // 异步发送数据
-    void asyncSend(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步发送
+    // void asyncSend(buffer_shared_ptr buf, size_t len);          // 异步发送数据
+    // void asyncSend(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步发送
 
-    void asyncSendFileDataStart(QFile *file, std::set<uint32_t> &unacked_id, TranPdu &tran_pdu,
-                                std::shared_ptr<std::atomic<std::uint32_t>> control,
-                                std::shared_ptr<std::condition_variable> cv, std::shared_ptr<std::mutex> mutex);
-    void asyncSendFileDataContinue(QFile *file, uint32_t chunk_size, uint64_t file_size, uint32_t total_chunks, uint32_t last_chunk_size, uint32_t cur_chunk_id,
-                                   std::shared_ptr<std::atomic<std::uint32_t>> control,
-                                   std::shared_ptr<std::condition_variable> cv, std::shared_ptr<std::mutex> mutex);
+    // void asyncSendFileDataStart(UpContext& file_ctx);
+    // void asyncSendFileDataContinue(UpContext& file_ctx, uint32_t cur_chunk_id);
 
-    void asyncRecvProtocol(buffer_shared_ptr buf, size_t header_len = PROTOCOLHEADER_LEN);    // 异步接收ProtocolHeader
-    void asyncRecvBody(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN); // 异步接收Body（在buf中已接受header的基础上）
+    // void asyncRecvProtocol(buffer_shared_ptr buf, size_t header_len = PROTOCOLHEADER_LEN);    // 异步接收ProtocolHeader
+    // void asyncRecvBody(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN); // 异步接收Body（在buf中已接受header的基础上）
 
-    void asyncRecvProtocolContinue(size_t header_len = PROTOCOLHEADER_LEN);
-    void asyncRecvBodyContinue(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN);
+    // void asyncRecvProtocolContinue(size_t header_len = PROTOCOLHEADER_LEN);
+    // void asyncRecvBodyContinue(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN);
 
-    void asyncRecv(buffer_shared_ptr buf, size_t len);          // 异步接收len字节数据到buf
-    void asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步接收
+    // void asyncRecv(buffer_shared_ptr buf, size_t len);          // 异步接收len字节数据到buf
+    // void asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步接收
 
+
+
+    // 异步连接到服务器，fun 为连接成功后的回调函数，默认使用 connectHandler
+    void asyncConnect(std::function<void()> fun = nullptr);
+    // 异步发送数据，fun 为发送成功后的回调函数，默认使用 sendHandler
+    void asyncSend(buffer_shared_ptr buf, size_t len, std::function<void()> fun = nullptr);
+    // 异步接收数据，fun 为接收成功后的回调函数，默认使用 recvHandler
+    void asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void()> fun = nullptr);
+    // 异步发送文件数据
+    void asyncSendFileData(UpContext& file_ctx);
+    // 异步接受服务端发送的通信协议，keep 表示是否持续接收
+    void asyncRecvProtocol(bool keep = false, size_t header_len = PROTOCOLHEADER_LEN);
 
     void SR_run();      // 在新线程开始异步任务
     void SR_run_local();// 在本地线程开始异步任务
@@ -82,14 +91,15 @@ signals:
 
 private:
     //异步回调函数
-    void connectHandler(const boost::system::error_code& ec);   // 异步连接成功后回调函数
-    void sendHandler(const boost::system::error_code& ec, std::size_t bytes_transferred);   // 异步发送成功回调函数
-    void recvHandler(const boost::system::error_code& ec, std::size_t bytes_transferred);   // 异步接收成功回调函数
+    void connectHandler();                              // 异步连接成功后回调函数
+    void sendHandler(std::size_t bytes_transferred);    // 异步发送成功回调函数
+    void recvHandler(std::size_t bytes_transferred);    // 异步接收成功回调函数
 
 private:
     std::shared_ptr<boost::asio::io_context> context_;          // IO 上下文
     std::shared_ptr<boost::asio::ssl::context>	ssl_context_;   // ssl 安全连接上下文，用于配置 SSL/TLS 连接的参数
     sslsock_ptr ssl_sock_;                   // sock安全套接字
     boost::asio::ip::tcp::endpoint ep_;     // 保存对端地址和端口信息，即服务器地址和端口
+    std::vector<std::thread> run_threads_;  // 运行（执行中context_->run()）的线程
     std::atomic<bool> running_ = true;
 };

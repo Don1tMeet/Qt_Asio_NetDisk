@@ -58,7 +58,7 @@ void DownTool::doingDown() {
     }
 
     // 发送请求成功后，接收回复
-    sr_tool_->asyncRecvProtocolContinue();  // 持续注册接收回复的异步事件
+    sr_tool_->asyncRecvProtocol(true);  // 持续注册接收回复的异步事件
     sr_tool_->SR_run(); // 在其它线程启动异步事件
 }
 

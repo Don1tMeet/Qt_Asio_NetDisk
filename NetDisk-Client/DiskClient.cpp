@@ -318,7 +318,7 @@ bool DiskClient::connectMainServer() {
 
 void DiskClient::startRecvProtocol() {
     if (sr_tool_) {
-        sr_tool_->asyncRecvProtocolContinue();
+        sr_tool_->asyncRecvProtocol(true);
         sr_tool_->SR_run();
         qDebug() << "start async loop";
     }

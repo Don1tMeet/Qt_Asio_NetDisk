@@ -1,4 +1,5 @@
 ﻿#include "UdTool.h"
+#include "SR_Tool.h"
 #include <openssl/sha.h>
 #include <QFileInfo>
 #include <QThread>
@@ -13,19 +14,19 @@ UdTool::~UdTool() {
     sr_tool_->SR_stop();    // 关闭异步任务
 
     // 关闭文件
-    if (file_.isOpen()) {
-        file_.close();
+    if (file_ctx_.file.isOpen()) {
+        file_ctx_.file.close();
     }
 
     // 关闭连接
     try {
-        // 尝试关闭 SSL 流
-        sr_tool_->getSSL()->shutdown();
+        sr_tool_->getSSL()->shutdown(); // 关闭 SSL
     }
     catch (const boost::system::system_error& e) {
         if (e.code() == boost::asio::ssl::error::stream_truncated) {
             qWarning() << "SSL 关闭警告：流被截断（对方可能已关闭连接）";
-        } else {
+        }
+        else {
             qWarning() << "SSL 关闭错误：" << e.what();
         }
     }
@@ -38,38 +39,52 @@ void UdTool::initSignals() {
             this, &UdTool::handleRecvPDURespond);
 }
 
-// 设置上传或下载的文件
+// 设置上传的文件
 void UdTool::setTranPdu(const TranPdu &tran_pdu) {
-    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! file_name与file_path容易混淆 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // tran_pdu.file_name实际上保存的是path/name
-    tran_pdu_ = tran_pdu;
-    file_name_ = QString(tran_pdu_.file_name);
-    file_.setFileName(file_name_);
+    if (Code::PUTS != tran_pdu.tran_pdu_code) {
+        emit error("UdTool::SetTranPdu(const TranPdu&): tran_pdu_code error");
+        return;
+    }
 
-    // 如果是上传，则打开文件
-    if (Code::PUTS == tran_pdu_.tran_pdu_code) {
-        if (!file_.open(QIODevice::ReadOnly)) {
-            emit error("UdTool::SetTranPdu(const TranPdu&): open file error");
-            return;
-        }
-        tran_pdu_.file_size = file_.size(); // 初始化文件大小
+    file_ctx_.tran_pdu = tran_pdu;
+
+    file_ctx_.file_name = QString(file_ctx_.tran_pdu.file_name);
+
+    file_ctx_.file.setFileName(file_ctx_.file_name);
+
+    // 打开文件
+    if (!file_ctx_.file.open(QIODevice::ReadOnly)) {
+        emit error("UdTool::SetTranPdu(const TranPdu&): open file error");
+        return;
+    }
+
+    file_ctx_.tran_pdu.file_size = file_ctx_.file.size();   // 初始化文件大小
+
+    file_ctx_.total_bytes = file_ctx_.tran_pdu.file_size;   // 文件总大小
+
+    file_ctx_.total_chunks = (file_ctx_.tran_pdu.file_size - 1) / file_ctx_.chunk_size + 1; // 总 chunk 数
+    file_ctx_.last_chunk_size = file_ctx_.total_bytes - static_cast<uint64_t>(file_ctx_.total_chunks-1) * file_ctx_.chunk_size; // 最后一个chunk的大小
+    // 初始化未确认（未发送成功）的chunks
+    for (uint32_t i=0; i<file_ctx_.total_chunks; ++i) {
+        file_ctx_.unacked_id.insert(i);
     }
 
     // 保存文件名（不带路径）
-    QFileInfo file_info(file_name_);
+    QFileInfo file_info(file_ctx_.file_name);
     QByteArray file_suffix = file_info.fileName().toUtf8();
-    memset(tran_pdu_.file_name, 0, sizeof(tran_pdu_.file_name));
-    memcpy(tran_pdu_.file_name, file_suffix.data(), file_suffix.size());
-    tran_pdu_.file_name[file_suffix.size()] = '\0';
+    memset(file_ctx_.tran_pdu.file_name, 0, sizeof(file_ctx_.tran_pdu.file_name));
+    memcpy(file_ctx_.tran_pdu.file_name, file_suffix.data(), file_suffix.size());
+    file_ctx_.tran_pdu.file_name[file_suffix.size()] = '\0';
 }
 
 // 设置传输控制对象
 void UdTool::setControlAtomic(std::shared_ptr<std::atomic<std::uint32_t>> control,
                               std::shared_ptr<std::condition_variable> cv, std::shared_ptr<std::mutex> mutex)
 {
-    control_ = control;
-    cv_ = cv;
-    mutex_ = mutex;
+    file_ctx_.ctrl = control;
+    file_ctx_.cv = cv;
+    file_ctx_.mtx = mutex;
 }
 
 // 计算文件哈希值
@@ -96,9 +111,9 @@ bool UdTool::calculateSHA256() {
     int read_bytes = 0;
 
     // 读取文件并更新哈希计算
-    if (file_.isOpen()) {
-        file_.seek(0);
-        while ((read_bytes = file_.read(buffer, buffer_size)) > 0) {
+    if (file_ctx_.file.isOpen()) {
+        file_ctx_.file.seek(0);
+        while ((read_bytes = file_ctx_.file.read(buffer, buffer_size)) > 0) {
             if (EVP_DigestUpdate(ctx, buffer, read_bytes) != 1) {
                 EVP_MD_CTX_free(ctx);
                 return false;
@@ -124,24 +139,25 @@ bool UdTool::calculateSHA256() {
     QByteArray sha256_result(reinterpret_cast<char*>(result), SHA256_DIGEST_LENGTH);
     QByteArray arry_hex = sha256_result.toHex();
 
-    if (sizeof(tran_pdu_.file_md5) < static_cast<unsigned long long>(arry_hex.size()) + 1) {
+    if (sizeof(file_ctx_.tran_pdu.file_md5) < static_cast<unsigned long long>(arry_hex.size()) + 1) {
         return false;
     }
 
-    memcpy(tran_pdu_.file_md5, arry_hex.data(), arry_hex.size());
-    tran_pdu_.file_md5[arry_hex.size()] = '\0';
+    memcpy(file_ctx_.tran_pdu.file_md5, arry_hex.data(), arry_hex.size());
+    file_ctx_.tran_pdu.file_md5[arry_hex.size()] = '\0';
     return true;
 }
 
 // 发送TranPdu到服务端
 bool UdTool::sendTranPdu() {
     // 序列化
-    auto buf = Serializer::serialize(tran_pdu_);
+    auto buf = Serializer::serialize(file_ctx_.tran_pdu);
 
-    sr_tool_->send(buf.get(), PROTOCOLHEADER_LEN + tran_pdu_.header.body_len, ec_);
+    boost::system::error_code ec;
+    sr_tool_->send(buf.get(), PROTOCOLHEADER_LEN + file_ctx_.tran_pdu.header.body_len, ec);
 
-    if (ec_) {
-        emit error("UdTool::sendTranPdu(): " + QString::fromStdString(ec_.what()));
+    if (ec) {
+        emit error("UdTool::sendTranPdu(): " + QString::fromStdString(ec.what()));
         return false;
     }
     return true;
@@ -150,22 +166,17 @@ bool UdTool::sendTranPdu() {
 // 开始发送文件
 bool UdTool::sendFile() {
     // 后续删除
-    if (!file_.isOpen()) {
+    if (!file_ctx_.file.isOpen()) {
         emit error("upload file error: file not open");
         return false;
     }
-    const uint32_t chunk_size = 2048;
-    total_chunks_ = (file_.size() - 1) / chunk_size + 1;
-    // 设置每次更新进度条需要的chunk数量，最少为 1
-    update_progress_need_chunks_ = std::max(static_cast<uint32_t>(1), total_chunks_ / 300);
 
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    // 这里传入过多参数，实际上可以将文件数据，包括控制变量保存在一个上传上下文（UploadContext）中，后续添加
     // 这里假设所有数据都能发送成功，后续添加重传机制
     // 这里sr_tool_使用了，file_，因此在销毁UdTool前，因该确保所有异步任务完成
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     qDebug() << "upload file: start send file data";
-    sr_tool_->asyncSendFileDataStart(&file_, unacked_id_, tran_pdu_, control_, cv_, mutex_);
+    sr_tool_->asyncSendFileData(file_ctx_);
 
     sr_tool_->SR_run(); // 开启一个异步任务循环
     return true;
@@ -214,13 +225,15 @@ void UdTool::handlePutsDataRespond(std::shared_ptr<PDURespond> pdu) {
         uint32_t chunk_id = 0;
         memcpy((char*)&chunk_id, pdu->msg.data(), sizeof(chunk_id));
         chunk_id = ntohl(chunk_id);
-        //  !!!!!!!!!!!!!!!!!!!!!!!!!! 这里不需要加锁，因此现在是单线程，但后续添加了重传机制，就不是了，需要加锁 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        unacked_id_.erase(chunk_id);    // 删除chunk_id
+        //  !!!!!!!!!!!!!!!!!!!!!!!!!! 这里不需要加锁，因此现在是单线程，但后续如果使用了线程池处理就需要加锁 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        file_ctx_.unacked_id.erase(chunk_id);   // 删除chunk_id
+        file_ctx_.sended_bytes += (chunk_id == file_ctx_.total_chunks-1) ? file_ctx_.last_chunk_size : file_ctx_.chunk_size;
+
         // 更新进度条
-        uint32_t recv_chunks = total_chunks_ - unacked_id_.size();  // 接收到的chunk数量
         // 如果达到更新条件在更新，避免一直更新卡顿UI，降低效率
-        if (recv_chunks % update_progress_need_chunks_ == 0) {
-            emit sendProgress(recv_chunks, total_chunks_);
+        double cur_progress = static_cast<double>(file_ctx_.sended_bytes) / file_ctx_.total_bytes;
+        if (cur_progress - last_progress_ >= progress_step_) {
+            emit sendProgress(file_ctx_.sended_bytes, file_ctx_.total_bytes);
         }
     }
 
@@ -233,20 +246,22 @@ void UdTool::handlePutsFinishRespond(std::shared_ptr<PDURespond> pdu) {
         memcpy((char*)&file_id, pdu->msg.data(), sizeof(file_id));
         file_id = ntohll(file_id);
 
-        emit sendItemData(tran_pdu_, file_id);  // 在文件视图系统中添加文件项
+        emit sendItemData(file_ctx_.tran_pdu, file_id); // 在文件视图系统中添加文件项
         // 发送完成确认回复
         TranFinishPdu ack_pdu;
         ack_pdu.header.type = ProtocolType::TRANFINISHPDU_TYPE;
         ack_pdu.header.body_len = TRANFINISHPDU_BODY_LEN;
         ack_pdu.code = Code::PUTS_FINISH;
-        ack_pdu.file_size = tran_pdu_.file_size;
-        memcpy(ack_pdu.file_md5, tran_pdu_.file_md5, sizeof(ack_pdu.file_md5));
+        ack_pdu.file_size = file_ctx_.total_bytes;
+        memcpy(ack_pdu.file_md5, file_ctx_.tran_pdu.file_md5, sizeof(ack_pdu.file_md5));
 
         auto buf = Serializer::serialize(ack_pdu);
-        sr_tool_->send(buf.get(), PROTOCOLHEADER_LEN + ack_pdu.header.body_len, ec_);
-        if (ec_) {
+
+        boost::system::error_code ec;
+        sr_tool_->send(buf.get(), PROTOCOLHEADER_LEN + ack_pdu.header.body_len, ec);
+        if (ec) {
             // !!!!!!!!!!!!!!!!!!!!! 处理发送错误的情况 !!!!!!!!!!!!!!!!!!!!!!!!
-            emit error("upload finish send error:" + QString::fromStdString(ec_.what()));
+            emit error("upload finish send error:" + QString::fromStdString(ec.what()));
         }
         else {
             emit sendProgress(1, 1);    // 更新进度条
@@ -261,9 +276,10 @@ void UdTool::handlePutsFinishRespond(std::shared_ptr<PDURespond> pdu) {
 // 开始执行任务槽函数，连接QThread的started信号
 void UdTool::doingUp() {
     // 连接服务器
-    sr_tool_->connect(ec_);
-    if (ec_) {
-        emit error("UdTool::doingUP(): connect error" + QString::fromLocal8Bit(ec_.message()));
+    boost::system::error_code ec;
+    sr_tool_->connect(ec);
+    if (ec) {
+        emit error("UdTool::doingUP(): connect error" + QString::fromLocal8Bit(ec.message()));
         return;
     }
     // 计算上传文件的哈希值
@@ -273,12 +289,12 @@ void UdTool::doingUp() {
     }
     // 发送TranPDU
     if(!sendTranPdu()) {
-        emit error("UdTool::doingUP(): send pdu error" + QString::fromLocal8Bit(ec_.message()));
+        emit error("UdTool::doingUP(): send pdu error" + QString::fromLocal8Bit(ec.message()));
         return;
     }
     qDebug() << "upload file: start upload";
     // 发送请求成功后，接收回复
-    sr_tool_->asyncRecvProtocolContinue();  // 持续注册接收回复的异步事件
+    sr_tool_->asyncRecvProtocol(true);  // 持续注册接收回复的异步事件
     sr_tool_->SR_run(); // 在其它线程启动异步事件
 }
 

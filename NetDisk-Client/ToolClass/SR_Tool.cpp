@@ -13,10 +13,12 @@ SR_Tool::SR_Tool(const std::string &ep_addr, const int &ep_port, QObject *parent
     // 配置 SSL 上下文，使其使用系统默认的证书路径来验证服务器证书。这样可以确保客户端信任操作系统预安装的根证书颁发机构（CA）
     ssl_context_->set_default_verify_paths();
     ssl_sock_ = std::make_shared<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*context_.get(), *ssl_context_.get());
+
+    run_threads_.clear();
 }
 
 SR_Tool::~SR_Tool() {
-    running_ = false;   // 停止异步操作
+    SR_stop();
 
     // 如果ssl_sock_为空或SSL底层TCP已经关闭（TCP关闭，说明SSL也关闭了），直接返回
     if (!ssl_sock_ || !ssl_sock_->lowest_layer().is_open()) {
@@ -134,426 +136,716 @@ bool SR_Tool::recvFileInfo(FileInfo &file_info) {
 }
 
 // 异步连接，连接完成调用 connectHandler：发射 connected 信号
-void SR_Tool::asyncConnect() {
-    //底层套接字异步连接，成功后，进行异步 ssl 握手
-    auto self = shared_from_this();
-    ssl_sock_->lowest_layer().async_connect(ep_,
-        [self](const boost::system::error_code& ec) {
-            if (!ec) {
-                self->ssl_sock_->async_handshake(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::client,
-                    std::bind(&SR_Tool::connectHandler, self, std::placeholders::_1));
-            }
-            else {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-            }
-        });
-}
+// void SR_Tool::asyncConnect() {
+//     //底层套接字异步连接，成功后，进行异步 ssl 握手
+//     auto self = shared_from_this();
+//     ssl_sock_->lowest_layer().async_connect(ep_,
+//         [self](const boost::system::error_code& ec) {
+//             if (!ec) {
+//                 self->ssl_sock_->async_handshake(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::client,
+//                     std::bind(&SR_Tool::connectHandler, self, std::placeholders::_1));
+//             }
+//             else {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//             }
+//         });
+// }
 
 // 异步连接，连接完成调用传入的函数
-void SR_Tool::asyncConnect(std::function<void ()> fun) {
-    auto self = shared_from_this();
+// void SR_Tool::asyncConnect(std::function<void ()> fun) {
+//     auto self = shared_from_this();
 
-    ssl_sock_->lowest_layer().async_connect(ep_,
-        [self, fun](const boost::system::error_code& ec) {
-            if (!ec) {
-                self->ssl_sock_->async_handshake(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::client,
-                    [self, fun](const boost::system::error_code& ec) {
-                        if (!ec) {
-                            fun();
-                        }
-                        else {
-                            emit emit self->error(QString::fromLocal8Bit(ec.message()));
-                        }
-                    });
-            }
-            else {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-            }
-        });
+//     ssl_sock_->lowest_layer().async_connect(ep_,
+//         [self, fun](const boost::system::error_code& ec) {
+//             if (!ec) {
+//                 self->ssl_sock_->async_handshake(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::client,
+//                     [self, fun](const boost::system::error_code& ec) {
+//                         if (!ec) {
+//                             fun();
+//                         }
+//                         else {
+//                             emit emit self->error(QString::fromLocal8Bit(ec.message()));
+//                         }
+//                     });
+//             }
+//             else {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//             }
+//         });
 
-}
+// }
 
 // 异步发送：将 buf 的 len 字节发送到对端，成功调用 sendHandler：发射 sendOK 信号
-void SR_Tool::asyncSend(buffer_shared_ptr buf, size_t len) {
-    auto self = shared_from_this();
-    qDebug() << "asyncWrite signup success";
-    boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
-        [self, buf](const boost::system::error_code& ec, size_t bytes_transferred) {
-            self->sendHandler(ec, bytes_transferred);
-        });
-}
+// void SR_Tool::asyncSend(buffer_shared_ptr buf, size_t len) {
+//     auto self = shared_from_this();
+//     qDebug() << "asyncWrite signup success";
+//     boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
+//         [self, buf](const boost::system::error_code& ec, size_t bytes_transferred) {
+//             self->sendHandler(ec, bytes_transferred);
+//         });
+// }
 
 // 异步发送：同 asyncSend(buffer_shared_ptr buf, size_t len)，但成功后调用给定的函数，而不是 sendHandler
-void SR_Tool::asyncSend(buffer_shared_ptr buf, size_t len, std::function<void ()> fun) {
+// void SR_Tool::asyncSend(buffer_shared_ptr buf, size_t len, std::function<void ()> fun) {
+//     auto self = shared_from_this();
+//     boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
+//         [self, fun, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (!ec) {
+//                 fun();
+//             }
+//             else {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//             }
+//         });
+// }
+
+// void SR_Tool::asyncSendFileDataStart(UpContext& file_ctx) {
+//     // 预处理
+//     if (!file_ctx.file.isOpen()) {
+//         emit error("upload file data error: file not open");
+//         return;
+//     }
+//     if (file_ctx.file.size() != static_cast<int64_t>(file_ctx.total_bytes)) {
+//         emit error("upload file data error: file size error");
+//         return;
+//     }
+
+//     // 开始发送数据
+//     qDebug() << "SR_Tool: asyncSendFileDataContinue: start";
+//     asyncSendFileDataContinue(file_ctx, 0);
+// }
+
+// void SR_Tool::asyncSendFileDataContinue(UpContext& file_ctx, uint32_t cur_chunk_id) {
+//     if (cur_chunk_id == file_ctx.total_chunks) { // 发送完所有数据
+//         return;
+//     }
+//     // 防止一直占用cpu
+//     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+//     auto self = shared_from_this();
+//     // 设置TranDataPud
+//     TranDataPdu pdu;
+//     pdu.header.type = ProtocolType::TRANDATAPDU_TYPE;
+//     pdu.header.body_len = TRANDATAPDU_BODY_BASE_LEN + (cur_chunk_id == file_ctx.total_chunks-1 ? file_ctx.last_chunk_size : file_ctx.chunk_size);
+//     pdu.code = Code::PUTS_DATA;
+//     // pdu.status = 0;
+//     pdu.file_offset = static_cast<uint64_t>(cur_chunk_id) * file_ctx.chunk_size;
+//     pdu.chunk_size = (cur_chunk_id == file_ctx.total_chunks-1 ? file_ctx.last_chunk_size : file_ctx.chunk_size);
+//     pdu.total_chunks = file_ctx.total_chunks;
+//     pdu.chunk_index = cur_chunk_id;
+//     // pdu.check_sum = 0;
+
+//     // 读取文件数据
+//     if (!file_ctx.file.isOpen()) {
+//         emit error("send file data error: file not open");
+//         return;
+//     }
+//     file_ctx.file.seek(pdu.file_offset);
+//     QByteArray byte_chunk = file_ctx.file.read(pdu.chunk_size);
+//     if (byte_chunk.size() != pdu.chunk_size) {
+//         emit error("send file data error: read file data faild");
+//         return;
+//     }
+//     pdu.data.assign(byte_chunk.constData(), pdu.chunk_size);
+
+//     // 传输控制
+//     if (file_ctx.ctrl->load() == 1) {       // 为 1 则暂停等待
+//         std::unique_lock<std::mutex>lock(*file_ctx.mtx.get());
+//         file_ctx.cv->wait(lock, [ctrl = file_ctx.ctrl] {return ctrl->load() != 1; });
+//     }
+//     else if (file_ctx.ctrl->load() == 2) {  // 为 2 则结束传输
+//         // !!!!!!!!!!!!!!!!!!!!!!!!! 应该发送信息通知服务端取消上传 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//         return;
+//     }
+//     // 为 0 则继续传输
+
+//     auto buf = Serializer::serialize(pdu);
+
+//     boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), PROTOCOLHEADER_LEN + pdu.header.body_len),
+//         [self, buf, &file_ctx, cur_chunk_id](const boost::system::error_code& ec, size_t bytes_transferred) {
+
+//             // 持续发送数据
+//             self->asyncSendFileDataContinue(file_ctx, cur_chunk_id + 1);
+//         });
+// }
+
+// 异步接收：将读缓冲区的 len 字节保存到 buf，成功后调用 recvHeaderHandler
+// void SR_Tool::asyncRecvProtocol(buffer_shared_ptr buf, size_t header_len) {
+//     auto self = shared_from_this();
+
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), header_len),
+//         [self, header_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (ec) {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//                 return;
+//             }
+//             if (header_len != bytes_transferred) {
+//                 emit self->error("recv ProtocolHeader failed: The data received is not as expected");
+//                 return;
+//             }
+//             // 反序列化header
+//             ProtocolHeader header;
+//             if (!Serializer::deserialize(buf.get(), header_len, header)) {
+//                 emit self->error("deserialize ProtocolHeader failed");
+//                 return;
+//             }
+//             if (header.body_len == 0) { // 一般不可能出现该情况
+//                 emit self->error("recv Protocol failed: no body");
+//                 return;
+//             }
+//             // 接收body
+//             self->asyncRecvBody(buf, header.body_len, header_len);
+//         });
+// }
+
+// 异步接收：在已接受header的基础上接收body，保存在buf中（header之后）
+// void SR_Tool::asyncRecvBody(buffer_shared_ptr buf, size_t body_len, size_t header_len) {
+//     auto self = shared_from_this();
+
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get() + header_len, body_len),
+//         [self, header_len, body_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (ec) {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//                 return;
+//             }
+//             if (body_len != bytes_transferred) {
+//                 emit self->error("recv ProtocolBody failed: The data received is not as expected");
+//                 return;
+//             }
+//             // 反序列化header
+//             // !!!!!!!!!!!!!!!!!!!!!!! 这里又解析了一次header，可优化 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//             ProtocolHeader header;
+//             if (!Serializer::deserialize(buf.get(), header_len, header)) {
+//                 emit self->error("deserialize ProtocolHeader failed");
+//                 return;
+//             }
+//             // 根据header类型，反序列化并发送信号
+//             switch (header.type) {
+//                 case ProtocolType::PDU_TYPE: {
+//                     std::shared_ptr<PDU> pdu = std::make_shared<PDU>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvPDUOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::PDURESPOND_TYPE: {
+//                     std::shared_ptr<PDURespond> pdu = std::make_shared<PDURespond>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvPDURespondOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANPDU_TYPE: {
+//                     std::shared_ptr<TranPdu> pdu = std::make_shared<TranPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANDATAPDU_TYPE: {
+//                     std::shared_ptr<TranDataPdu> pdu = std::make_shared<TranDataPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranDataPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANFINISHPDU_TYPE: {
+//                     std::shared_ptr<TranFinishPdu> pdu = std::make_shared<TranFinishPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranFinishPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::RESPONDPACK_TYPE: {
+//                     std::shared_ptr<RespondPack> pdu = std::make_shared<RespondPack>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvRespondPackOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::USERINFO_TYPE: {
+//                     std::shared_ptr<UserInfo> pdu = std::make_shared<UserInfo>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvUserInfoOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::FILEINFO_TYPE: {
+//                     std::shared_ptr<FileInfo> pdu = std::make_shared<FileInfo>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvFileInfoOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 default: {
+//                     emit self->error("unknown ProtocolType");
+//                     break;
+//                 }
+//             }
+//         });
+// }
+
+// void SR_Tool::asyncRecvProtocolContinue(size_t header_len) {
+//     auto buf = BufferPool::getInstance().acquire();
+//     auto self = shared_from_this();
+
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), header_len),
+//         [self, header_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (ec) {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//                 return;
+//             }
+//             if (header_len != bytes_transferred) {
+//                 emit self->error("recv ProtocolHeader failed: The data received is not as expected");
+//                 return;
+//             }
+//             // 反序列化header
+//             ProtocolHeader header;
+//             if (!Serializer::deserialize(buf.get(), header_len, header)) {
+//                 emit self->error("deserialize ProtocolHeader failed");
+//                 return;
+//             }
+//             if (header.body_len == 0) { // 一般不可能出现该情况
+//                 emit self->error("recv Protocol failed: no body");
+//                 return;
+//             }
+//             // 接收body
+//             self->asyncRecvBodyContinue(buf, header.body_len, header_len);
+//         });
+// }
+
+// void SR_Tool::asyncRecvBodyContinue(buffer_shared_ptr buf, size_t body_len, size_t header_len) {
+//     auto self = shared_from_this();
+
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get() + header_len, body_len),
+//         [self, header_len, body_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (ec) {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//                 return;
+//             }
+//             if (body_len != bytes_transferred) {
+//                 emit self->error("recv ProtocolBody failed: The data received is not as expected");
+//                 return;
+//             }
+//             // 反序列化header
+//             // !!!!!!!!!!!!!!!!!!!!!!! 这里又解析了一次header，可优化 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//             ProtocolHeader header;
+//             if (!Serializer::deserialize(buf.get(), header_len, header)) {
+//                 emit self->error("deserialize ProtocolHeader failed");
+//                 return;
+//             }
+//             // 根据header类型，反序列化并发送信号
+//             switch (header.type) {
+//                 case ProtocolType::PDU_TYPE: {
+//                     std::shared_ptr<PDU> pdu = std::make_shared<PDU>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvPDUOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::PDURESPOND_TYPE: {
+//                     std::shared_ptr<PDURespond> pdu = std::make_shared<PDURespond>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvPDURespondOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANPDU_TYPE: {
+//                     std::shared_ptr<TranPdu> pdu = std::make_shared<TranPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANDATAPDU_TYPE: {
+//                     std::shared_ptr<TranDataPdu> pdu = std::make_shared<TranDataPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranDataPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::TRANFINISHPDU_TYPE: {
+//                     std::shared_ptr<TranFinishPdu> pdu = std::make_shared<TranFinishPdu>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvTranFinishPduOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::RESPONDPACK_TYPE: {
+//                     std::shared_ptr<RespondPack> pdu = std::make_shared<RespondPack>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvRespondPackOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::USERINFO_TYPE: {
+//                     std::shared_ptr<UserInfo> pdu = std::make_shared<UserInfo>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvUserInfoOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 case ProtocolType::FILEINFO_TYPE: {
+//                     std::shared_ptr<FileInfo> pdu = std::make_shared<FileInfo>();
+//                     if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
+//                         emit self->recvFileInfoOK(pdu);
+//                     }
+//                     break;
+//                 }
+//                 default: {
+//                     emit self->error("unknown ProtocolType");
+//                     break;
+//                 }
+//             }
+//             self->asyncRecvProtocolContinue();
+//         });
+// }
+
+// 异步接收：将读缓冲区的 len 字节保存到 buf，成功后调用 recvHandler
+// void SR_Tool::asyncRecv(buffer_shared_ptr buf, size_t len) {
+//     auto self = shared_from_this();
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
+//         [self, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             self->recvHandler(bytes_transferred);
+//         });
+// }
+
+// 异步接收：同 asyncRecv(buffer_shared_ptr buf, size_t len)，但成功后调用给定的函数，而不是 recvHandler
+// void SR_Tool::asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void ()> fun) {
+//     auto self = shared_from_this();
+//     boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
+//         [self, fun, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+//             if (!ec) {
+//                 fun();
+//             }
+//             else {
+//                 emit self->error(QString::fromLocal8Bit(ec.message()));
+//             }
+//         });
+// }
+
+// 异步连接到服务器，连接完成后调用 fun，未传入 fun 调用connectHandler
+void SR_Tool::asyncConnect(std::function<void()> fun) {
     auto self = shared_from_this();
-    boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
-        [self, fun, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (!ec) {
-                fun();
+
+    // 启动协程
+    boost::asio::co_spawn(
+        ssl_sock_->lowest_layer().get_executor(),
+        [self, fun]() -> boost::asio::awaitable<void> {
+            try {
+                // 异步连接
+                co_await self->ssl_sock_->lowest_layer().async_connect(
+                    self->ep_,
+                    boost::asio::use_awaitable
+                );
+
+                // 连接成功，进行SSL握手
+                co_await self->ssl_sock_->async_handshake(
+                    boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::client,
+                    boost::asio::use_awaitable
+                );
+
+                // 握手成功，调用处理函数
+                if (fun) {
+                    fun();
+                }
+                else {
+                    self->connectHandler();
+                }
             }
-            else {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
+            catch (const boost::system::system_error& e) {
+                emit self->error(QString::fromLocal8Bit(e.what()));
             }
-        });
+        },
+        boost::asio::detached  // 协程独立运行，不阻塞接口调用
+    );
 }
 
-void SR_Tool::asyncSendFileDataStart(QFile *file, std::set<uint32_t> &unacked_id, TranPdu &tran_pdu,
-                                     std::shared_ptr<std::atomic<std::uint32_t>> control,
-                                     std::shared_ptr<std::condition_variable> cv, std::shared_ptr<std::mutex> mutex)
-{
-    // 预处理
-    if (!file->isOpen()) {
+// 异步发送数据，成功调用 fun，fun 未定义，调用 sendHandler
+void SR_Tool::asyncSend(buffer_shared_ptr buf, size_t len, std::function<void()> fun) {
+    auto self = shared_from_this();
+
+    // 启动协程
+    boost::asio::co_spawn(
+        ssl_sock_->get_executor(),  // 使用套接字关联的执行器
+        [self, buf, len, fun]() -> boost::asio::awaitable<void> {
+            try {
+                // 协程等待异步发送完成
+                size_t bytes_transferred = co_await boost::asio::async_write(
+                    *self->ssl_sock_.get(),
+                    boost::asio::buffer(buf.get(), len),
+                    boost::asio::use_awaitable  // 使用use_awaitable替代回调
+                );
+
+                // 发送成功，调用处理函数
+                if (fun) {
+                    fun();
+                }
+                else{
+                    self->sendHandler(bytes_transferred);
+                }
+            }
+            catch (const boost::system::system_error& e) {
+                emit self->error(QString::fromLocal8Bit(e.what()));
+            }
+            co_return;
+        },
+        boost::asio::detached  // 协程独立运行，不阻塞调用者
+    );
+}
+
+void SR_Tool::asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void ()> fun) {
+    auto self = shared_from_this();
+
+    boost::asio::co_spawn(
+        ssl_sock_->get_executor(),
+        [self, buf, len, fun]() -> boost::asio::awaitable<void> {
+            try {
+                size_t bytes_transferred = co_await boost::asio::async_read(
+                    *self->ssl_sock_.get(),
+                    boost::asio::buffer(buf.get(), len),
+                    boost::asio::use_awaitable
+                );
+
+                // 发送成功，调用处理函数
+                if (fun) {
+                    fun();
+                }
+                else{
+                    self->recvHandler(bytes_transferred);
+                }
+            }
+            catch (const boost::system::system_error& e) {
+                emit self->error(QString::fromLocal8Bit(e.what()));
+            }
+            co_return;
+        },
+        boost::asio::detached
+    );
+}
+
+void SR_Tool::asyncSendFileData(UpContext &file_ctx) {
+    if (!file_ctx.file.isOpen()) {
         emit error("upload file data error: file not open");
         return;
     }
-    if (file->size() != static_cast<int64_t>(tran_pdu.file_size)) {
+    if (file_ctx.file.size() != static_cast<int64_t>(file_ctx.total_bytes)) {
         emit error("upload file data error: file size error");
         return;
-    }
-    const uint32_t chunk_size = 2048;   // 默认chunk大小
-    uint64_t file_size = tran_pdu.file_size;
-    uint32_t total_chunks = (file_size-1) / chunk_size + 1; // chunk数量，向上取整
-    uint32_t last_chunk_size = file_size - static_cast<uint64_t>(total_chunks-1) * chunk_size;  // 最后一个chunk的大小
-    // 初始化未确认（未发送成功）的chunks
-    for (uint32_t i=0; i<total_chunks; ++i) {
-        unacked_id.insert(i);
     }
 
     // 开始发送数据
     qDebug() << "SR_Tool: asyncSendFileDataContinue: start";
-    asyncSendFileDataContinue(file, chunk_size, file_size, total_chunks, last_chunk_size, 0, control, cv, mutex);
-}
-
-void SR_Tool::asyncSendFileDataContinue(QFile *file, uint32_t chunk_size, uint64_t file_size, uint32_t total_chunks, uint32_t last_chunk_size, uint32_t cur_chunk_id,
-                                        std::shared_ptr<std::atomic<std::uint32_t>> control,
-                                        std::shared_ptr<std::condition_variable> cv, std::shared_ptr<std::mutex> mutex)
-{
-    if (cur_chunk_id == total_chunks) { // 发送完所有数据
-        return;
-    }
-    // 防止一直占用cpu
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     auto self = shared_from_this();
-    // 设置TranDataPud
-    TranDataPdu pdu;
-    pdu.header.type = ProtocolType::TRANDATAPDU_TYPE;
-    pdu.header.body_len = TRANDATAPDU_BODY_BASE_LEN + (cur_chunk_id == total_chunks-1 ? last_chunk_size : chunk_size);
-    pdu.code = Code::PUTS_DATA;
-    // pdu.status = 0;
-    pdu.file_offset = static_cast<uint64_t>(cur_chunk_id) * chunk_size;
-    pdu.chunk_size = (cur_chunk_id == total_chunks-1 ? last_chunk_size : chunk_size);
-    pdu.total_chunks = total_chunks;
-    pdu.chunk_index = cur_chunk_id;
-    // pdu.check_sum = 0;
 
-    // 读取文件数据
-    if (!file->isOpen()) {
-        emit error("send file data error: file not open");
-        return;
-    }
-    file->seek(pdu.file_offset);
-    QByteArray byte_chunk = file->read(pdu.chunk_size);
-    if (byte_chunk.size() != pdu.chunk_size) {
-        emit error("send file data error: read file data faild");
-        return;
-    }
-    pdu.data.assign(byte_chunk.constData(), pdu.chunk_size);
+    boost::asio::co_spawn(
+        ssl_sock_->get_executor(),  // 使用套接字关联的执行器
+        [self, &file_ctx]() -> boost::asio::awaitable<void> {
+            for (uint32_t cur_chunk_id=0; cur_chunk_id<file_ctx.total_chunks; ++cur_chunk_id) {
+                try {
+                    // 防止一直占用cpu
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    // 传输控制
-    if (control->load() == 1) {        // 为 1 则暂停等待
-        std::unique_lock<std::mutex>lock(*mutex.get());
-        cv->wait(lock, [control] {return control->load() != 1; });
-    }
-    else if (control->load() == 2) {   //为 2 则结束传输
-        // !!!!!!!!!!!!!!!!!!!!!!!!! 应该发送信息通知服务端取消上传 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        return;
-    }
+                    // 设置TranDataPud
+                    TranDataPdu pdu;
+                    pdu.header.type = ProtocolType::TRANDATAPDU_TYPE;
+                    pdu.header.body_len = TRANDATAPDU_BODY_BASE_LEN + (cur_chunk_id == file_ctx.total_chunks-1 ? file_ctx.last_chunk_size : file_ctx.chunk_size);
+                    pdu.code = Code::PUTS_DATA;
+                    // pdu.status = 0;
+                    pdu.file_offset = static_cast<uint64_t>(cur_chunk_id) * file_ctx.chunk_size;
+                    pdu.chunk_size = (cur_chunk_id == file_ctx.total_chunks-1 ? file_ctx.last_chunk_size : file_ctx.chunk_size);
+                    pdu.total_chunks = file_ctx.total_chunks;
+                    pdu.chunk_index = cur_chunk_id;
+                    // pdu.check_sum = 0;
 
-    auto buf = Serializer::serialize(pdu);
+                    // 读取文件数据
+                    if (!file_ctx.file.isOpen()) {
+                        emit self->error("send file data error: file not open");
+                        co_return;
+                    }
+                    file_ctx.file.seek(pdu.file_offset);
+                    QByteArray byte_chunk = file_ctx.file.read(pdu.chunk_size);
+                    if (byte_chunk.size() != pdu.chunk_size) {
+                        emit self->error("send file data error: read file data faild");
+                        co_return;
+                    }
+                    pdu.data.assign(byte_chunk.constData(), pdu.chunk_size);
 
-    boost::asio::async_write(*ssl_sock_.get(), boost::asio::buffer(buf.get(), PROTOCOLHEADER_LEN + pdu.header.body_len),
-        [self, buf, file, chunk_size, file_size, total_chunks, last_chunk_size, cur_chunk_id, control, cv, mutex](const boost::system::error_code& ec, size_t bytes_transferred) {
+                    // 传输控制
+                    if (file_ctx.ctrl->load() == 1) {       // 为 1 则暂停等待
+                        std::unique_lock<std::mutex>lock(*file_ctx.mtx.get());
+                        file_ctx.cv->wait(lock, [ctrl = file_ctx.ctrl] { return ctrl->load() != 1; });
+                    }
+                    else if (file_ctx.ctrl->load() == 2) {  // 为 2 则结束传输
+                        // !!!!!!!!!!!!!!!!!!!!!!!!! 应该发送信息通知服务端取消上传 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        co_return;
+                    }
+                    // 为 0 则继续传输
 
-            // 持续发送数据
-            self->asyncSendFileDataContinue(file, chunk_size, file_size, total_chunks, last_chunk_size, cur_chunk_id + 1, control, cv, mutex);
-        });
+                    // 发送数据
+                    auto buf = Serializer::serialize(pdu);
+                    size_t bytes_transferred = co_await boost::asio::async_write(
+                        *self->ssl_sock_.get(),
+                        boost::asio::buffer(buf.get(), PROTOCOLHEADER_LEN + pdu.header.body_len),
+                        boost::asio::use_awaitable
+                    );
+
+                    (void) bytes_transferred;   // 防止未使用 bytes_transferred 警告
+                }
+                catch (const boost::system::system_error& e) {
+                    emit self->error(QString::fromLocal8Bit(e.what()));
+                    co_return;
+                }
+            }
+            co_return;
+        },
+        boost::asio::detached
+    );
 }
 
-// 异步接收：将读缓冲区的 len 字节保存到 buf，成功后调用 recvHeaderHandler
-void SR_Tool::asyncRecvProtocol(buffer_shared_ptr buf, size_t header_len) {
+// 接受服务端发送过来的通信协议，keep 表示是否持续接受
+void SR_Tool::asyncRecvProtocol(bool keep, size_t header_len) {
     auto self = shared_from_this();
 
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), header_len),
-        [self, header_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (ec) {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-                return;
-            }
-            if (header_len != bytes_transferred) {
-                emit self->error("recv ProtocolHeader failed: The data received is not as expected");
-                return;
-            }
-            // 反序列化header
-            ProtocolHeader header;
-            if (!Serializer::deserialize(buf.get(), header_len, header)) {
-                emit self->error("deserialize ProtocolHeader failed");
-                return;
-            }
-            if (header.body_len == 0) { // 一般不可能出现该情况
-                emit self->error("recv Protocol failed: no body");
-                return;
-            }
-            // 接收body
-            self->asyncRecvBody(buf, header.body_len, header_len);
-        });
-}
+    boost::asio::co_spawn(
+        ssl_sock_->get_executor(),
+        [self, keep, header_len]() -> boost::asio::awaitable<void> {
+            do {
+                auto buf = BufferPool::getInstance().acquire();
+                try {
+                    // 读取协议头（异步）
+                    size_t bytes_transferred = co_await boost::asio::async_read(
+                        *self->ssl_sock_.get(),
+                        boost::asio::buffer(buf.get(), header_len),
+                        boost::asio::use_awaitable
+                    );
 
-// 异步接收：在已接受header的基础上接收body，保存在buf中（header之后）
-void SR_Tool::asyncRecvBody(buffer_shared_ptr buf, size_t body_len, size_t header_len) {
-    auto self = shared_from_this();
+                    if (header_len != bytes_transferred) {
+                        emit self->error("recv ProtocolHeader failed: The data received is not as expected");
+                        co_return;
+                    }
 
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get() + header_len, body_len),
-        [self, header_len, body_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (ec) {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-                return;
-            }
-            if (body_len != bytes_transferred) {
-                emit self->error("recv ProtocolBody failed: The data received is not as expected");
-                return;
-            }
-            // 反序列化header
-            // !!!!!!!!!!!!!!!!!!!!!!! 这里又解析了一次header，可优化 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            ProtocolHeader header;
-            if (!Serializer::deserialize(buf.get(), header_len, header)) {
-                emit self->error("deserialize ProtocolHeader failed");
-                return;
-            }
-            // 根据header类型，反序列化并发送信号
-            switch (header.type) {
-                case ProtocolType::PDU_TYPE: {
-                    std::shared_ptr<PDU> pdu = std::make_shared<PDU>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvPDUOK(pdu);
+                    // 反序列化header
+                    ProtocolHeader header;
+                    if (!Serializer::deserialize(buf.get(), header_len, header)) {
+                        emit self->error("deserialize ProtocolHeader failed");
+                        co_return;
                     }
-                    break;
-                }
-                case ProtocolType::PDURESPOND_TYPE: {
-                    std::shared_ptr<PDURespond> pdu = std::make_shared<PDURespond>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvPDURespondOK(pdu);
+                    if (header.body_len == 0) { // 一般不可能出现该情况
+                        emit self->error("recv Protocol failed: no body");
+                        co_return;
                     }
-                    break;
-                }
-                case ProtocolType::TRANPDU_TYPE: {
-                    std::shared_ptr<TranPdu> pdu = std::make_shared<TranPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::TRANDATAPDU_TYPE: {
-                    std::shared_ptr<TranDataPdu> pdu = std::make_shared<TranDataPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranDataPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::TRANFINISHPDU_TYPE: {
-                    std::shared_ptr<TranFinishPdu> pdu = std::make_shared<TranFinishPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranFinishPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::RESPONDPACK_TYPE: {
-                    std::shared_ptr<RespondPack> pdu = std::make_shared<RespondPack>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvRespondPackOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::USERINFO_TYPE: {
-                    std::shared_ptr<UserInfo> pdu = std::make_shared<UserInfo>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvUserInfoOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::FILEINFO_TYPE: {
-                    std::shared_ptr<FileInfo> pdu = std::make_shared<FileInfo>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvFileInfoOK(pdu);
-                    }
-                    break;
-                }
-                default: {
-                    emit self->error("unknown ProtocolType");
-                    break;
-                }
-            }
-        });
-}
 
-void SR_Tool::asyncRecvProtocolContinue(size_t header_len) {
-    auto buf = BufferPool::getInstance().acquire();
-    auto self = shared_from_this();
+                    // 读取协议体（异步）
+                    bytes_transferred = co_await boost::asio::async_read(
+                        *self->ssl_sock_.get(),
+                        boost::asio::buffer(buf.get() + header_len, header.body_len),
+                        boost::asio::use_awaitable
+                    );
 
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), header_len),
-        [self, header_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (ec) {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-                return;
-            }
-            if (header_len != bytes_transferred) {
-                emit self->error("recv ProtocolHeader failed: The data received is not as expected");
-                return;
-            }
-            // 反序列化header
-            ProtocolHeader header;
-            if (!Serializer::deserialize(buf.get(), header_len, header)) {
-                emit self->error("deserialize ProtocolHeader failed");
-                return;
-            }
-            if (header.body_len == 0) { // 一般不可能出现该情况
-                emit self->error("recv Protocol failed: no body");
-                return;
-            }
-            // 接收body
-            self->asyncRecvBodyContinue(buf, header.body_len, header_len);
-        });
-}
+                    if (header.body_len != bytes_transferred) {
+                        emit self->error("recv ProtocolBody failed: The data received is not as expected");
+                        co_return;
+                    }
 
-void SR_Tool::asyncRecvBodyContinue(buffer_shared_ptr buf, size_t body_len, size_t header_len) {
-    auto self = shared_from_this();
+                    // 根据header类型，反序列化并发送信号
+                    switch (header.type) {
+                        case ProtocolType::PDU_TYPE: {
+                            std::shared_ptr<PDU> pdu = std::make_shared<PDU>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvPDUOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::PDURESPOND_TYPE: {
+                            std::shared_ptr<PDURespond> pdu = std::make_shared<PDURespond>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvPDURespondOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::TRANPDU_TYPE: {
+                            std::shared_ptr<TranPdu> pdu = std::make_shared<TranPdu>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvTranPduOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::TRANDATAPDU_TYPE: {
+                            std::shared_ptr<TranDataPdu> pdu = std::make_shared<TranDataPdu>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvTranDataPduOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::TRANFINISHPDU_TYPE: {
+                            std::shared_ptr<TranFinishPdu> pdu = std::make_shared<TranFinishPdu>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvTranFinishPduOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::RESPONDPACK_TYPE: {
+                            std::shared_ptr<RespondPack> pdu = std::make_shared<RespondPack>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvRespondPackOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::USERINFO_TYPE: {
+                            std::shared_ptr<UserInfo> pdu = std::make_shared<UserInfo>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvUserInfoOK(pdu);
+                            }
+                            break;
+                        }
+                        case ProtocolType::FILEINFO_TYPE: {
+                            std::shared_ptr<FileInfo> pdu = std::make_shared<FileInfo>();
+                            if (Serializer::deserialize(buf.get(), header_len+header.body_len, *pdu)) {
+                                emit self->recvFileInfoOK(pdu);
+                            }
+                            break;
+                        }
+                        default: {
+                            emit self->error("unknown ProtocolType");
+                            break;
+                        }
+                    }
+                }
+                catch (const boost::system::system_error& e) {
+                    emit self->error(QString::fromLocal8Bit(e.what()));
+                    co_return;
+                }
 
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get() + header_len, body_len),
-        [self, header_len, body_len, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (ec) {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-                return;
-            }
-            if (body_len != bytes_transferred) {
-                emit self->error("recv ProtocolBody failed: The data received is not as expected");
-                return;
-            }
-            // 反序列化header
-            // !!!!!!!!!!!!!!!!!!!!!!! 这里又解析了一次header，可优化 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            ProtocolHeader header;
-            if (!Serializer::deserialize(buf.get(), header_len, header)) {
-                emit self->error("deserialize ProtocolHeader failed");
-                return;
-            }
-            // 根据header类型，反序列化并发送信号
-            switch (header.type) {
-                case ProtocolType::PDU_TYPE: {
-                    std::shared_ptr<PDU> pdu = std::make_shared<PDU>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvPDUOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::PDURESPOND_TYPE: {
-                    std::shared_ptr<PDURespond> pdu = std::make_shared<PDURespond>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvPDURespondOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::TRANPDU_TYPE: {
-                    std::shared_ptr<TranPdu> pdu = std::make_shared<TranPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::TRANDATAPDU_TYPE: {
-                    std::shared_ptr<TranDataPdu> pdu = std::make_shared<TranDataPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranDataPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::TRANFINISHPDU_TYPE: {
-                    std::shared_ptr<TranFinishPdu> pdu = std::make_shared<TranFinishPdu>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvTranFinishPduOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::RESPONDPACK_TYPE: {
-                    std::shared_ptr<RespondPack> pdu = std::make_shared<RespondPack>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvRespondPackOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::USERINFO_TYPE: {
-                    std::shared_ptr<UserInfo> pdu = std::make_shared<UserInfo>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvUserInfoOK(pdu);
-                    }
-                    break;
-                }
-                case ProtocolType::FILEINFO_TYPE: {
-                    std::shared_ptr<FileInfo> pdu = std::make_shared<FileInfo>();
-                    if (Serializer::deserialize(buf.get(), header_len+body_len, *pdu)) {
-                        emit self->recvFileInfoOK(pdu);
-                    }
-                    break;
-                }
-                default: {
-                    emit self->error("unknown ProtocolType");
-                    break;
-                }
-            }
-            self->asyncRecvProtocolContinue();
-        });
-}
+            } while (keep && self->running_);
 
-// 异步接收：将读缓冲区的 len 字节保存到 buf，成功后调用 recvHandler
-void SR_Tool::asyncRecv(buffer_shared_ptr buf, size_t len) {
-    auto self = shared_from_this();
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
-        [self, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            self->recvHandler(ec, bytes_transferred);
-        });
-}
-
-// 异步接收：同 asyncRecv(buffer_shared_ptr buf, size_t len)，但成功后调用给定的函数，而不是 recvHandler
-void SR_Tool::asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void ()> fun) {
-    auto self = shared_from_this();
-    boost::asio::async_read(*ssl_sock_.get(), boost::asio::buffer(buf.get(), len),
-        [self, fun, buf](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-            if (!ec) {
-                fun();
-            }
-            else {
-                emit self->error(QString::fromLocal8Bit(ec.message()));
-            }
-        });
+            co_return;
+        },
+        boost::asio::detached
+    );
 }
 
 // 开始异步任务
 void SR_Tool::SR_run() {
     running_ = true;
     auto self = shared_from_this();
-
-    // !!!!!!!!!!!!!!!! 后续采用加入式(join) !!!!!!!!!!!!!!!!!!!!
-    std::thread([self]() {
-        try {
-            while (self->running_) {
-                if (0 == self->context_->run()) {
-                    // 没有异步任务休眠，避免长时间占用cpu
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    run_threads_.emplace_back(std::thread(
+        [self]() {
+            try {
+                while (self->running_) {
+                    if (0 == self->context_->run()) {
+                        // 没有异步任务休眠，避免长时间占用cpu
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
                 }
             }
+            catch (const std::exception& e) {
+                emit self->error(QString::fromLocal8Bit(e.what()));
+                return;
+            }
         }
-        catch (const std::exception& e) {
-            emit self->error(QString::fromLocal8Bit(e.what()));
-        }
-    }).detach();    // 分离式，避免 UI 阻塞
+    ));
 }
 
 void SR_Tool::SR_run_local() {
@@ -574,34 +866,26 @@ void SR_Tool::SR_run_local() {
 // 结束异步任务
 void SR_Tool::SR_stop() {
     running_ = false;
+    for (auto& th : run_threads_) {
+        if (th.joinable()) {
+            th.join();
+        }
+    }
 }
 
 // 异步连接成功时的回调函数
-void SR_Tool::connectHandler(const boost::system::error_code &ec) {
-    if (ec) {
-        emit error(QString::fromLocal8Bit(ec.message()));
-    }
-    else {
-        emit connected();
-    }
+void SR_Tool::connectHandler() {
+    emit connected();
 }
 
 // 发送成功回调函数
-void SR_Tool::sendHandler(const boost::system::error_code &ec, std::size_t bytes_transferred) {
-    if (ec) {
-        emit error(QString::fromLocal8Bit(ec.message()));
-    }
-    else {
-        emit sendOK();
-    }
+void SR_Tool::sendHandler(std::size_t bytes_transferred) {
+    (void) bytes_transferred;   // 防止未使用 bytes_transferred 的警告
+    emit sendOK();
 }
 
 // 接收成功回调函数
-void SR_Tool::recvHandler(const boost::system::error_code &ec, std::size_t bytes_transferred) {
-    if (ec) {
-        emit error(QString::fromLocal8Bit(ec.message()));
-    }
-    else {
-        emit recvOK();
-    }
+void SR_Tool::recvHandler(std::size_t bytes_transferred) {
+    (void) bytes_transferred;   // 防止未使用 bytes_transferred 的警告
+    emit recvOK();
 }

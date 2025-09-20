@@ -173,7 +173,7 @@ void Login::handleSend() {
     // 接收服务器的回复
     qDebug() << "async send success";
     auto buf = BufferPool::getInstance().acquire(); // 获取缓冲区
-    sr_tool_->asyncRecvProtocol(buf);    // 接收通信协议
+    sr_tool_->asyncRecvProtocol(false); // 接收通信协议
 
 }
 
