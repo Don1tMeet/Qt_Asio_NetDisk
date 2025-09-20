@@ -1,5 +1,5 @@
 # Qt_Asio_NetDisk
-基于Qt和Boost.Asio的网盘程序，客户端在Qt构建，服务端和负载均衡器在linux下构建
+基于Qt和Boost.Asio的网盘项目，客户端在Qt构建，服务端和负载均衡器在linux下构建
 
 完成本项目你需要具备以下基础知识：c++基础（包括智能指针等新特性），Qt基础，linux网络编程和多线程编程
 
