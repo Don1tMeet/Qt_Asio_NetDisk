@@ -61,6 +61,36 @@ bool PutsTool::firstCheck(UpDownCon *conn) {
     std::lock_guard<std::mutex> lock(conn->getSendMutex());
     sr_tool_.sendPDURespond(conn->getSSL(), respond);   //将结果发回客户端
   }
+
+  if (respond.status == Status::PUT_QUICK) {  // 秒传，直接发送完成回复
+    // 插入数据库，并发送回复
+    MyDB db;
+    std::string suffix = getSuffix(conn->getTaskFileName());
+    // 插入数据到数据库，并修改已使用空间
+    uint64_t ret = db.insertFileData(conn->getUser(), conn->getTaskFileName(), conn->getTaskFileMd5(), conn->getTaskFileSize(), conn->getTaskParentDirId(), suffix);
+
+    respond.header.type = ProtocolType::PDURESPOND_TYPE;
+    respond.header.body_len = PDURESPOND_BODY_BASE_LEN;
+    respond.code = Code::PUTS_FINISH;
+    if(ret != 0) {
+      respond.status = Status::SUCCESS;
+      respond.msg_amount = 1;
+      respond.header.body_len = PDURESPOND_BODY_BASE_LEN + sizeof(ret);
+      respond.msg_len = sizeof(ret);
+      ret = htonll(ret);
+      respond.msg.assign((char*)&ret, sizeof(ret));
+    }
+    else {
+      respond.status = Status::FAILED;
+    }
+  }
+  // 发送回复
+  {
+    // 理论上不会有多个线程同时调用，但任然加锁
+    std::lock_guard<std::mutex> lock(conn->getSendMutex());
+    sr_tool_.sendPDURespond(conn->getSSL(), respond);   //将结果发回客户端
+  }
+
   if(respond.status == Status::FAILED || respond.status == Status::NO_CAPACITY) { //出错改成重新认证
     conn->client_type = AbstractCon::LONGTASK;
     conn->setVerify(false);

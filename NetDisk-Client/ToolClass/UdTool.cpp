@@ -165,12 +165,6 @@ bool UdTool::sendTranPdu() {
 
 // 开始发送文件
 bool UdTool::sendFile() {
-    // 后续删除
-    if (!file_ctx_.file.isOpen()) {
-        emit error("upload file error: file not open");
-        return false;
-    }
-
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // 这里假设所有数据都能发送成功，后续添加重传机制
     // 这里sr_tool_使用了，file_，因此在销毁UdTool前，因该确保所有异步任务完成
@@ -202,7 +196,9 @@ void UdTool::handlePutsRespond(std::shared_ptr<PDURespond> pdu) {
             break;
         }
         case Status::PUT_QUICK: {
-            // !!!!!!!!!!!!!!!!!!!! 处理快传 !!!!!!!!!!!!!!!!!!!!!
+            file_ctx_.sended_bytes = file_ctx_.total_bytes;
+            file_ctx_.unacked_id.clear();
+            emit sendProgress(1, 1);
             break;
         }
         case Status::FAILED: {

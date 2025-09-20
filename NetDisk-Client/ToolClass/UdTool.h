@@ -30,7 +30,7 @@ struct UpContext {
     std::shared_ptr<std::mutex> mtx{ nullptr };
 };
 
-// 处理上传下载（长任务）的类
+// 处理上传（长任务）的类
 class UdTool : public QObject {
     Q_OBJECT
 
