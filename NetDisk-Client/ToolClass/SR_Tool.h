@@ -38,25 +38,6 @@ public:
 
 public:
     // 异步操作，异步事件完成会触发相关信号。连接信号，接收异步结果。也可以传递回调函数，在异步事件就绪时候，调用回调函数。调用异步任务后，需要SR_run()启动异步循环
-    // void asyncConnect();                            // 异步连接服务器
-    // void asyncConnect(std::function<void()> fun);   // 传递函数对象，异步连接
-
-    // void asyncSend(buffer_shared_ptr buf, size_t len);          // 异步发送数据
-    // void asyncSend(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步发送
-
-    // void asyncSendFileDataStart(UpContext& file_ctx);
-    // void asyncSendFileDataContinue(UpContext& file_ctx, uint32_t cur_chunk_id);
-
-    // void asyncRecvProtocol(buffer_shared_ptr buf, size_t header_len = PROTOCOLHEADER_LEN);    // 异步接收ProtocolHeader
-    // void asyncRecvBody(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN); // 异步接收Body（在buf中已接受header的基础上）
-
-    // void asyncRecvProtocolContinue(size_t header_len = PROTOCOLHEADER_LEN);
-    // void asyncRecvBodyContinue(buffer_shared_ptr buf, size_t body_len, size_t header_len = PROTOCOLHEADER_LEN);
-
-    // void asyncRecv(buffer_shared_ptr buf, size_t len);          // 异步接收len字节数据到buf
-    // void asyncRecv(buffer_shared_ptr buf, size_t len, std::function<void()> fun);    // 传递函数对象，异步接收
-
-
 
     // 异步连接到服务器，fun 为连接成功后的回调函数，默认使用 connectHandler
     void asyncConnect(std::function<void()> fun = nullptr);
@@ -68,6 +49,7 @@ public:
     void asyncSendFileData(UpContext& file_ctx);
     // 异步接受服务端发送的通信协议，keep 表示是否持续接收
     void asyncRecvProtocol(bool keep = false, size_t header_len = PROTOCOLHEADER_LEN);
+
 
     void SR_run();      // 在新线程开始异步任务
     void SR_run_local();// 在本地线程开始异步任务

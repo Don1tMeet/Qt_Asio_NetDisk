@@ -39,7 +39,6 @@ SOURCES += \
     ToolClass/TaskQue.cpp \
     ToolClass/UdTool.cpp \
     WidgetClass/FileSystem.cpp \
-    WidgetClass/FileViewSystem.cpp \
     WidgetClass/Login.cpp \
     WidgetClass/TProgress.cpp \
     WidgetClass/UserInfoWidget.cpp \
@@ -56,7 +55,6 @@ HEADERS += \
     ToolClass/TaskQue.h \
     ToolClass/UdTool.h \
     WidgetClass/FileSystem.h \
-    WidgetClass/FileViewSystem.h \
     WidgetClass/Login.h \
     WidgetClass/TProgress.h \
     WidgetClass/UserInfoWidget.h \

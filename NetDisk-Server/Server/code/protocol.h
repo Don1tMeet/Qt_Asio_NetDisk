@@ -188,15 +188,6 @@ struct TranControlPdu {
   std::string msg{ "" };    // 控制信息
 };
 
-// 服务器简版回复客户端包体，不用每次携带大量数据
-#define RESPONDPACK_BODY_BASE_LEN (2 * sizeof(uint32_t))
-struct RespondPack {
-  ProtocolHeader header;      // 头部（type=3）
-  std::uint32_t code = 0;     // 状态码
-  std::uint32_t len = 0;      // 备用空间存有数据量长度
-  char reserve[200]{ 0 };     // 备用空间
-};
-
 // 客户端信息结构体，用来保存从服务器接收的用户信息
 #define USERINFO_BODY_LEN (USERSCOLLEN * USERSCOLMAXSIZE)
 struct UserInfo {

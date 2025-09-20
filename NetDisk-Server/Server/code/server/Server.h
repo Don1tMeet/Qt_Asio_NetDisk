@@ -33,7 +33,6 @@ int conn_pool_count, int sql_port, int thread_count, int logque_size,int timeout
   void handleNewConnection(int select);
   void handleClientData(AbstractCon *client); // 处理客户端发送过来的数据
   void handleClientTask(buffer_shared_ptr buf, AbstractCon *client);
-  void createFactory(AbstractCon *con);
 
  private: // 辅助函数
   bool connectEqualizer(const std::string &equalizer_ip, const int &equalizer_port, const std::string &mine_ip, const int mini_sport, const int &mini_lport, const std::string &server_name, const std::string &key);

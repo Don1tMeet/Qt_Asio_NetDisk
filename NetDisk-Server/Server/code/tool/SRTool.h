@@ -13,14 +13,6 @@ class SRTool {
   size_t sendPDURespond(SSL *ssl, const PDURespond &pdu);
   size_t sendTranDataPdu(SSL *ssl, const TranDataPdu &pdu);
 
-  
-  size_t recvPDU(SSL *ssl, PDU &pdu);           // 安全套接字接收PDU
-  
-  size_t recvTranPdu(SSL *ssl,TranPdu &pdu);    //安全套接字接受TranPdu
-
-  size_t sendRespond(SSL *ssl, const RespondPack &respond);  //安全套接字服务器回复简易包体
-  size_t recvRespond(SSL *ssl, RespondPack &respond);        //安全接收客户端简易响应包体
-
   size_t sendUserInfo(SSL *ssl, const UserInfo &info);      //使用ssl发生客户信息
 
   bool sendFileInfo(SSL *ssl, std::vector<FileInfo> &vet);  //使用ssl把文件信息全部发送回客户端

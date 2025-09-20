@@ -210,8 +210,6 @@ void DiskClient::initSignals() {
     connect(task_manager_.get(), &ShortTaskManager::getFileListOK,
             this, &DiskClient::handleGetFileInfo);
     // 创建文件夹成功信号
-    // connect(task_manager_.get(), &ShortTaskManager::createDirOK,
-    //         file_view_, &FileViewSystem::addNewDirItem);
     connect(task_manager_.get(), &ShortTaskManager::createDirOK,
             file_view_, &FileSystem::addNewDirItem);
     // 删除文件成功信号
@@ -232,28 +230,18 @@ void DiskClient::initSignals() {
     connect(user_info_pb_, &QPushButton::clicked,
             this, &DiskClient::handleInfoPBClicked);
     // 刷新视图信号
-    // connect(file_view_, &FileViewSystem::refreshView,
-    //         this, &DiskClient::requestCD);
     connect(file_view_, &FileSystem::refreshView,
             this, &DiskClient::requestCD);
     // 下载信号
-    // connect(file_view_, &FileViewSystem::download,
-    //         this, &DiskClient::handleGetsClicked);
     connect(file_view_, &FileSystem::download,
             this, &DiskClient::handleGetsClicked);
     // 上传信号
-    // connect(file_view_, &FileViewSystem::upload,
-    //         this, &DiskClient::handlePutsClicked);
     connect(file_view_, &FileSystem::upload,
             this, &DiskClient::handlePutsClicked);
     // 创建文件夹信号
-    // connect(file_view_, &FileViewSystem::createDir,
-    //         this, &DiskClient::handleCreateDir);
     connect(file_view_, &FileSystem::createDir,
             this, &DiskClient::handleCreateDir);
     // 删除文件信号
-    // connect(file_view_, &FileViewSystem::deleteFile,
-    //         this, &DiskClient::handleDeleteFile);
     connect(file_view_, &FileSystem::deleteFile,
             this, &DiskClient::handleDeleteFile);
 }
@@ -507,15 +495,11 @@ void DiskClient::handlePutsClicked() {
     QObject::connect(progress, &TProgress::cancel,
                      worker, &UdTool::sendCancelRequest);
     // 上传完成，添加文件项
-    // QObject::connect(worker, &UdTool::sendItemData,
-    //                  file_view_, &FileViewSystem::addNewFileItem);
     QObject::connect(worker, &UdTool::sendItemData,
                      file_view_, &FileSystem::addNewFileItem);
     // 处理错误
     QObject::connect(worker, &UdTool::error,
                      this, &DiskClient::handleError);
-    // QObject::connect(worker, &UdTool::workFinished,
-    //                  this, &DiskClient::RequestCD);    // 上传完成，刷新界面。文件太多会导致刷新压力大，不使用。
 
     // 设置worker的控制变量，与progress共用一套，因为progress可以控制worker的行为
     worker->setControlAtomic(progress->getAtomic(), progress->getCv(), progress->getMutex());

@@ -199,26 +199,8 @@ void ShortTaskManager::handleFileInfo(std::shared_ptr<FileInfo> pdu) {
 
 void ShortTaskManager::initSignals() {
     // 连接sr_tool_的信号
-    // connect(sr_tool_.get(), &SR_Tool::recvPDUOK,
-    //         this, &ShortTaskManager::handleRecvPDU);
-
     connect(sr_tool_.get(), &SR_Tool::recvPDURespondOK,
             this, &ShortTaskManager::handleRecvPDURespond);
-
-    // connect(sr_tool_.get(), &SR_Tool::recvTranPduOK,
-    //         this, &ShortTaskManager::handleRecvTranPdu);
-
-    // connect(sr_tool_.get(), &SR_Tool::recvTranDataPduOK,
-    //         this, &ShortTaskManager::handleRecvTranDataPdu);
-
-    // connect(sr_tool_.get(), &SR_Tool::recvTranFinishPduOK,
-    //         this, &ShortTaskManager::handleRecvTranFinishPdu);
-
-    // connect(sr_tool_.get(), &SR_Tool::recvRespondPackOK,
-    //         this, &ShortTaskManager::handleRecvPDURespond);
-
-    // connect(sr_tool_.get(), &SR_Tool::recvUserInfoOK,
-    //         this, &ShortTaskManager::handleRecvUserInfo);
 
     connect(sr_tool_.get(), &SR_Tool::recvFileInfoOK,
             this, &ShortTaskManager::handleRecvFileInfo);

@@ -407,42 +407,6 @@ void Server::handleClientTask(buffer_shared_ptr buf, AbstractCon *client) {
   }
 }
 
-// 接收客户端命令，生成具体工厂分类处理任务
-void Server::createFactory(AbstractCon *con) {
-  std::shared_ptr<AbstractTool> tool;
-  SRTool sr_tool;   //创建一个发收工具
-  if (con->client_type == AbstractCon::ConType::SHOTTASK) { //如果是短任务
-    PDU pdu;
-    sr_tool.recvPDU(con->getSSL(), pdu);
-    tool = getTool(pdu, con);
-  }
-  else if ((con->client_type == AbstractCon::ConType::LONGTASK && con->getIsVerify() == false)) { // 长任务已经首次连接，无法确定是下载还是上传）
-    TranPdu pdu;
-    sr_tool.recvTranPdu(con->getSSL(), pdu);
-    tool = getTool(pdu, con);
-  }
-  else {  // 长任务已经认证，处于进行中状态
-    switch (con->client_type) {
-      case AbstractCon::ConType::PUTTASK:           tool = std::make_shared<PutsTool>(con); break;
-      case AbstractCon::ConType::GETTASK:           tool = std::make_shared<GetsTool>(con); break;
-      case AbstractCon::ConType::GETTASKWAITCHECK:  tool = std::make_shared<GetsTool>(con); break;
-    }
-  }
-  // 执行任务
-  if (tool) {
-    tool->doingTask();
-  }
-
-  // 重新添加监控
-  // !!!!!!!!!!!!!!!!!! 疑问：为什么要修改文件描述符的监听事件 !!!!!!!!!!!!!!!!!!!!!!!!
-  if (con->client_type == AbstractCon::ConType::GETTASK) {  // 如果是下载任务，需要多监控可写事件
-    epoller_->modFd(con->getSock(), conn_event_|EPOLLIN|EPOLLOUT);
-  }
-  else {
-    epoller_->modFd(con->getSock(), conn_event_|EPOLLIN);   // 重新添加监控
-  }
-}
-
 // 根据任务代码不同，生成不同的具体工厂类处理短任务
 std::shared_ptr<AbstractTool> Server::getTool(PDU &pdu, AbstractCon *con) {
   assert(con);

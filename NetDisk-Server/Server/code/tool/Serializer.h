@@ -35,10 +35,6 @@ class Serializer {
   static buffer_shared_ptr serialize(const TranControlPdu& pdu);
   static bool deserialize(const char* buf, size_t len, TranControlPdu& pdu);
 
-  // 序列化与反序列化RespondPack
-  static buffer_shared_ptr serialize(const RespondPack& pdu);
-  static bool deserialize(const char* buf, size_t len, RespondPack& pdu);
-
   // 序列化与反序列化UserInfo
   static buffer_shared_ptr serialize(const UserInfo& pdu);
   static bool deserialize(const char* buf, size_t len, UserInfo& pdu);
